@@ -9,7 +9,9 @@ struct Measurement: Identifiable {
     let bmi: Double
     let bodyFatPercent: Double
     let waterPercent: Double
+    let bodyWaterKg: Double
     let muscleRate: Double
+    let boneMassKg: Double
     let bmr: Int              // 基础代谢
     let leanBodyMassKg: Double // 去脂体重
 }
@@ -56,6 +58,7 @@ enum BodyComposition {
         var waterPct = (100.0 - fatPct) * 0.7
         let waterCoeff = waterPct <= 50 ? 1.02 : 0.98
         waterPct = min(75.0, max(35.0, waterPct * waterCoeff))
+        let bodyWaterKg = weight * waterPct / 100.0
 
         // 骨量 -> 骨率
         var boneMass: Double
@@ -89,7 +92,9 @@ enum BodyComposition {
             bmi: (bmi * 10).rounded() / 10,
             bodyFatPercent: (fatPct * 10).rounded() / 10,
             waterPercent: (waterPct * 10).rounded() / 10,
+            bodyWaterKg: (bodyWaterKg * 10).rounded() / 10,
             muscleRate: (muscleRate * 10).rounded() / 10,
+            boneMassKg: (boneMass * 10).rounded() / 10,
             bmr: bmr,
             leanBodyMassKg: (leanBodyMass * 10).rounded() / 10
         )

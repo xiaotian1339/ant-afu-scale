@@ -24,6 +24,10 @@ Scale 是用 SwiftUI 写的 iOS 体脂秤 App。手机作为蓝牙中心设备�
 
 本项目未上架 App Store，需要下载打包好的 IPA 后自行安装到 iPhone。整体流程：**下载 IPA → 签名 → 安装 → 首次运行授权**。
 
+### 0. 用 GitHub Actions 构建无签名 IPA
+
+仓库已内置 `.github/workflows/build-unsigned-ipa.yml`。可在 GitHub 仓库的 **Actions → Build Unsigned IPA** 手动触发构建，完成后在 Artifacts 下载 `Scale-unsigned-ipa`（里面是 `Scale-unsigned.ipa`）。
+
 ### 1. 下载 IPA
 
 从 Releases 下载最新安装包：
