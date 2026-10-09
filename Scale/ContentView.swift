@@ -88,7 +88,9 @@ struct ContentView: View {
                     metric("体脂率", String(format: "%.1f%%", m.bodyFatPercent))
                     metric("BMI", String(format: "%.1f", m.bmi))
                     metric("水分率", String(format: "%.1f%%", m.waterPercent))
+                    metric("体水分质量", String(format: "%.1f kg", m.bodyWaterKg))
                     metric("肌肉率", String(format: "%.1f%%", m.muscleRate))
+                    metric("骨量", String(format: "%.1f kg", m.boneMassKg))
                     metric("基础代谢", "\(m.bmr) kcal")
                     metric("去脂体重", String(format: "%.1f kg", m.leanBodyMassKg))
                 }
