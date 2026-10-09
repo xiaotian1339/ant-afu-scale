@@ -1,6 +1,20 @@
 import Foundation
 import HealthKit
 
+enum HealthKitSyncError: LocalizedError {
+    case missingEntitlement
+    case authorizationDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .missingEntitlement:
+            return "健康权限不可用：当前签名缺少 HealthKit 能力。请用包含 HealthKit 的描述文件重签，并确保 Bundle ID 与描述文件一致。"
+        case .authorizationDenied:
+            return "没有健康写入权限，请在「健康」App 或系统设置里重新允许写入。"
+        }
+    }
+}
+
 /// 把测量结果写入 Apple「健康」App。
 final class HealthKitManager {
     private let store = HKHealthStore()
@@ -28,12 +42,17 @@ final class HealthKitManager {
         var types: Set<HKSampleType> = [bodyMass, bodyFat, bmiType, leanMass]
         if let boneMass { types.insert(boneMass) }
         if let bodyWaterMass { types.insert(bodyWaterMass) }
-        try await store.requestAuthorization(toShare: types, read: [])
+        do {
+            try await store.requestAuthorization(toShare: types, read: [])
+        } catch {
+            throw mapError(error)
+        }
     }
 
     /// 写入一次测量：体重、体脂率、BMI、去脂体重。
     func save(_ m: Measurement) async throws {
         guard isAvailable else { return }
+        try await requestAuthorization()
         let date = m.date
         var samples: [HKQuantitySample] = []
 
@@ -71,6 +90,24 @@ final class HealthKitManager {
                 start: date, end: date))
         }
 
-        try await store.save(samples)
+        do {
+            try await store.save(samples)
+        } catch {
+            throw mapError(error)
+        }
+    }
+
+    private func mapError(_ error: Error) -> Error {
+        let nsError = error as NSError
+        let text = error.localizedDescription.lowercased()
+        if text.contains("missing com.apple.developer.healthkit entitlement") {
+            return HealthKitSyncError.missingEntitlement
+        }
+        if nsError.domain == HKErrorDomain,
+           let code = HKError.Code(rawValue: nsError.code),
+           code == .errorAuthorizationDenied {
+            return HealthKitSyncError.authorizationDenied
+        }
+        return error
     }
 }
