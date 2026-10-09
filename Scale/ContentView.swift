@@ -29,7 +29,12 @@ struct ContentView: View {
                 ProfileView(profile: $profile)
             }
             .task {
-                try? await health.requestAuthorization()
+                guard UserProfile.load().autoSyncHealth else { return }
+                do {
+                    try await health.requestAuthorization()
+                } catch {
+                    healthMessage = "健康权限未就绪：\(error.localizedDescription)"
+                }
             }
             .onAppear {
                 // 测到稳定值 → 写入健康
