@@ -21,7 +21,7 @@ jobs:
         run: |
           xcodebuild \
             -project Scale.xcodeproj \
-            -scheme Scale \
+            -scheme "Scale App" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
