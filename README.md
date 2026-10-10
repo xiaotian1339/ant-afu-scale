@@ -24,17 +24,18 @@ Scale 是用 SwiftUI 写的 iOS 体脂秤 App。手机作为蓝牙中心设备�
 
 本项目未上架 App Store，需要下载打包好的 IPA 后自行安装到 iPhone。整体流程：**下载 IPA → 签名 → 安装 → 首次运行授权**。
 
-### 0. 用 GitHub Actions 构建无签名 IPA
+### 0. 自动构建与发布无签名 IPA
 
-仓库已内置 `.github/workflows/build-unsigned-ipa.yml`。可在 GitHub 仓库的 **Actions → Build Unsigned IPA** 手动触发构建，完成后在 Artifacts 下载 `Scale-unsigned-ipa`（里面是 `Scale-unsigned.ipa`）。
+`.github/workflows/build-unsigned-ipa.yml` 会在推送到 `main`、推送版本标签（如 `v1.0.0`）或在 `main` 手动运行时构建，并自动创建对应版本的 GitHub Release，上传 `Scale-v1.0.0-unsigned.ipa`。Pull Request 只测试、构建和上传 Actions Artifact，不发布 Release。
+
+- `main` 的版本取自 Xcode 项目的 `MARKETING_VERSION`；发布新版本前同时更新 Debug / Release 的版本号。
+- 标签必须为 `v主版本.次版本.修订版本`，标签构建会将该版本写入 IPA。
+- 已发布的版本不会被覆盖；同版本后续构建仍可从 Actions Artifacts 下载。
+- 构建关闭代码签名，不需要 Apple 证书、Development Team 或签名密钥。IPA 安装前仍需自行签名。
 
 ### 1. 下载 IPA
 
-从 Releases 下载最新安装包：
-
-> 📦 [Scale.v0.1.ipa](https://github.com/Aoko-Aozaki/ant-afu-scale/releases/download/ipa/Scale.v0.1.ipa)
-
-IPA 是没有签名的，直接装不上，需要用下面任一方式签名。**不确定选哪个：想免费、能接受每 7 天重签一次，选方式 A；想省事、装完能用大半年，选方式 B。**
+从[本仓库 Releases](https://github.com/xiaotian1339/ant-afu-scale/releases)下载无签名安装包，或从 Actions 的 `Scale-unsigned-ipa` Artifact 下载。签名方式如下。
 
 ### 2A. 自签名（免费，证书 7 天有效）
 
@@ -112,3 +113,18 @@ IPA 是没有签名的，直接装不上，需要用下面任一方式签名。*
   
 
 区别在于：`ant-afu-welland-scale` 是 macOS 上跑的 Python CLI，而 Scale 是 iOS 原生 App（靠 CoreBluetooth + SwiftUI），并额外接入了 Apple「健康」。参考项目自身的用法请见其仓库：<https://github.com/Mzdyl/ant-afu-welland-scale>。
+
+## 新增功能与开发验证
+
+功能移植自 [ShawnRn/ant-afu-scale](https://github.com/ShawnRn/ant-afu-scale) 的 `5479f0a`：本地历史记录、按自然日取最新一次测量的趋势图、更多身体指标与评估、自定义头像、从 Apple「健康」读取身体资料，以及用户授权文件夹中的 iCloud 云盘同步。身体成分仍为估算值；本次移植也采用了对方的身体成分公式，结果可能与旧版不同。
+
+应用最低支持版本保持 **iOS 16.0**。未引入对方的个人 Development Team、签名脚本、iOS 27 部署要求或个人 Xcode 设置。文件夹同步依赖系统文件选择器授权，不要求应用自有 iCloud 容器；解除绑定后停止后续同步，已开始的文件操作可能仍会完成。同步按记录 UUID 合并；删除只影响本地记录，云端已有记录可能在下一次同步时重新导入，清理云端备份需自行处理。
+
+在 macOS / Xcode 上运行核心回归检查：
+
+```bash
+swiftc -swift-version 5 Scale/UserProfile.swift Scale/Scale27.swift Scale/BodyComposition.swift Tests/CoreTests.swift -o /tmp/scale-core-tests
+/tmp/scale-core-tests
+```
+
+Actions 会执行这些检查，并以 iOS 16 部署目标进行无签名 Release 构建。蓝牙通信、iCloud 文件授权、导航交互和 HealthKit 同步需在真机验证。Linux 无法完成 iOS 构建与真机验证。

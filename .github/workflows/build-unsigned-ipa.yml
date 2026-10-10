@@ -1,46 +1,117 @@
-name: Build Unsigned IPA
+name: Build and Release Unsigned IPA
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-latest
-
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build app (no signing)
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);/\1/p' Scale.xcodeproj/project.pbxproj | sort -u)
+          if [[ "$REF_TYPE" == tag ]]; then VERSION="${REF_NAME#v}"; fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a version like 1.0.0 or a tag like v1.0.0" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Test core models
+        run: |
+          swiftc -swift-version 5 Scale/UserProfile.swift Scale/Scale27.swift Scale/BodyComposition.swift Tests/CoreTests.swift -o "$RUNNER_TEMP/scale-core-tests"
+          "$RUNNER_TEMP/scale-core-tests"
+      - name: Build app (no signing, iOS 16)
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
           xcodebuild \
             -project Scale.xcodeproj \
             -scheme "Scale App" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+            MARKETING_VERSION="$APP_VERSION" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             clean build
-
       - name: Package unsigned IPA
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          APP_PATH="$(find build/Build/Products -type d -name "Scale.app" | head -n 1)"
-          test -n "$APP_PATH"
+          set -euo pipefail
+          APP_PATH=build/Build/Products/Release-iphoneos/Scale.app
+          test -d "$APP_PATH"
+          test ! -d "$APP_PATH/_CodeSignature"
+          test ! -f "$APP_PATH/embedded.mobileprovision"
           mkdir -p build/Payload
           cp -R "$APP_PATH" build/Payload/
-          (cd build && /usr/bin/zip -qry Scale-unsigned.ipa Payload)
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+          (cd build && /usr/bin/zip -qry "Scale-v${APP_VERSION}-unsigned.ipa" Payload)
+      - uses: actions/upload-artifact@v4
         with:
           name: Scale-unsigned-ipa
-          path: build/Scale-unsigned.ipa
+          path: build/Scale-*-unsigned.ipa
           if-no-files-found: error
+
+  release:
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ needs.build.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Scale-unsigned-ipa
+          path: dist
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Published versions are immutable; bump MARKETING_VERSION for a new release.
+          EXISTING_TAGS=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          if grep -Fxq "$RELEASE_TAG" <<< "$EXISTING_TAGS"; then
+            echo "Release $RELEASE_TAG already exists; keeping its original assets."
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" dist/*.ipa \
+            --target "$RELEASE_COMMIT" \
+            --title "Scale $RELEASE_TAG" \
+            --notes '无签名 IPA，需要自行签名后安装。支持 iOS 16 及以上；蓝牙和 HealthKit 功能需在真机授权后使用。'

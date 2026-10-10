@@ -15,6 +15,17 @@ enum HealthKitSyncError: LocalizedError {
     }
 }
 
+/// 从 Apple「健康」读取到的个人身体资料
+struct HealthProfileData {
+    var heightCm: Double?
+    var age: Int?
+    var isMale: Bool?
+
+    var hasAnyData: Bool {
+        heightCm != nil || age != nil || isMale != nil
+    }
+}
+
 /// 把测量结果写入 Apple「健康」App。
 final class HealthKitManager {
     private let store = HKHealthStore()
@@ -34,6 +45,10 @@ final class HealthKitManager {
         HKObjectType.quantityType(forIdentifier: bodyWaterMassIdentifier)
     }
 
+    private let heightType = HKQuantityType(.height)
+    private let dateOfBirthType = HKCharacteristicType(.dateOfBirth)
+    private let biologicalSexType = HKCharacteristicType(.biologicalSex)
+
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
     /// 请求写入权限（首次会弹系统授权页）。
@@ -43,10 +58,72 @@ final class HealthKitManager {
         if let boneMass { types.insert(boneMass) }
         if let bodyWaterMass { types.insert(bodyWaterMass) }
         do {
-            try await store.requestAuthorization(toShare: types, read: [])
+            try await store.requestAuthorization(toShare: types, read: [heightType, dateOfBirthType, biologicalSexType])
         } catch {
             throw mapError(error)
         }
+    }
+
+    /// 从 Apple「健康」异步读取最新的身高（厘米）
+    func fetchLatestHeight() async throws -> Double? {
+        guard isAvailable else { return nil }
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(sampleType: heightType,
+                                      predicate: nil,
+                                      limit: 1,
+                                      sortDescriptors: [sortDescriptor]) { _, samples, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let sample = samples?.first as? HKQuantitySample else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let heightCm = sample.quantity.doubleValue(for: .meterUnit(with: .centi))
+                continuation.resume(returning: (heightCm * 10).rounded() / 10.0)
+            }
+            store.execute(query)
+        }
+    }
+
+    /// 从 Apple「健康」读取出生日期并计算出当前年龄
+    func fetchAge() -> Int? {
+        guard isAvailable else { return nil }
+        do {
+            let components = try store.dateOfBirthComponents()
+            guard let birthDate = Calendar.current.date(from: components) else { return nil }
+            let ageComponents = Calendar.current.dateComponents([.year], from: birthDate, to: Date())
+            return ageComponents.year
+        } catch {
+            return nil
+        }
+    }
+
+    /// 从 Apple「健康」读取生理性别（true=男，false=女）
+    func fetchBiologicalSex() -> Bool? {
+        guard isAvailable else { return nil }
+        do {
+            let sexObject = try store.biologicalSex()
+            switch sexObject.biologicalSex {
+            case .male: return true
+            case .female: return false
+            default: return nil
+            }
+        } catch {
+            return nil
+        }
+    }
+
+    /// 一键从 Apple「健康」获取全部可用的个人资料
+    func fetchUserProfile() async throws -> HealthProfileData {
+        guard isAvailable else { return HealthProfileData() }
+        let height = try? await fetchLatestHeight()
+        let age = fetchAge()
+        let isMale = fetchBiologicalSex()
+        return HealthProfileData(heightCm: height, age: age, isMale: isMale)
     }
 
     /// 写入一次测量：体重、体脂率、BMI、去脂体重。
@@ -86,7 +163,7 @@ final class HealthKitManager {
         if let bodyWaterMass {
             samples.append(HKQuantitySample(
                 type: bodyWaterMass,
-                quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: m.bodyWaterKg),
+                quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: m.waterMassKg),
                 start: date, end: date))
         }
 
