@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UniformTypeIdentifiers
 
 /// 趋势分析关注的身体指标
 enum TrendMetric: String, CaseIterable, Identifiable {
@@ -683,11 +684,15 @@ private struct TrendHistoryListView: View {
             }
 
             Button {
-                UIPasteboard.general.string = String(
+                let text = String(
                     format: "%.2f kg (体脂率 %.1f%%, BMI %.1f)",
                     m.weightKg,
                     m.bodyFatPercent,
                     m.bmi
+                )
+                UIPasteboard.general.setItems(
+                    [[UTType.utf8PlainText.identifier: text]],
+                    options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(60)]
                 )
             } label: {
                 Label("拷贝数据", systemImage: "doc.on.doc")

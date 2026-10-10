@@ -16,6 +16,7 @@ final class CloudSyncManager: ObservableObject {
     private var pendingSync = false
     private var bindingGeneration = 0
 
+    @Published private(set) var bindingError: String?
     @Published private(set) var isSyncing = false
     @Published private(set) var syncState: CloudSyncState = .idle
     @Published private(set) var lastSyncTime: Date?
@@ -34,11 +35,9 @@ final class CloudSyncManager: ObservableObject {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         do {
-            // 只接收文件夹；文件的访问授权不等同于其父目录的授权。
-            guard try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
-                throw CocoaError(.fileReadUnsupportedScheme)
-            }
+            try SyncFolderAccess.validate(url)
             let bookmark = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+            bindingError = nil
             bindingGeneration += 1
             UserDefaults.standard.set(bookmark, forKey: bookmarkKey)
             UserDefaults.standard.set(url.lastPathComponent, forKey: folderNameKey)
@@ -46,12 +45,16 @@ final class CloudSyncManager: ObservableObject {
             isFolderBound = true
             syncNow(historyStore: historyStore)
         } catch {
-            syncState = .error(error.localizedDescription)
-            statusMessage = "绑定失败：\(error.localizedDescription)"
+            bindingError = error.localizedDescription
+            // 更换目录失败时保留已绑定目录和原同步状态。
+            if !isFolderBound { statusMessage = "绑定失败：\(error.localizedDescription)" }
         }
     }
 
+    func clearBindingError() { bindingError = nil }
+
     func unbindFolder() {
+        bindingError = nil
         bindingGeneration += 1
         pendingSync = false
         for key in [bookmarkKey, folderNameKey, lastSyncKey] { UserDefaults.standard.removeObject(forKey: key) }
@@ -107,8 +110,10 @@ final class CloudSyncManager: ObservableObject {
         -> (records: [Measurement], bookmark: Data) {
         var stale = false
         let folder = try URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
-        guard folder.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }
-        defer { folder.stopAccessingSecurityScopedResource() }
+        let accessing = folder.startAccessingSecurityScopedResource()
+        defer { if accessing { folder.stopAccessingSecurityScopedResource() } }
+        try SyncFolderAccess.validate(folder)
+        guard accessing || SyncFolderAccess.isAppLocalDirectory(folder) else { throw CocoaError(.fileReadNoPermission) }
         let renewed = stale ? try folder.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) : bookmark
         let file = folder.appendingPathComponent("measurements_history.json")
         var coordinationError: NSError?
@@ -118,6 +123,8 @@ final class CloudSyncManager: ObservableObject {
             operationResult = Result {
                 let remote: [Measurement]
                 do {
+                    let values = try coordinatedURL.resourceValues(forKeys: [.isSymbolicLinkKey])
+                    guard values.isSymbolicLink != true else { throw SyncFolderAccess.ValidationError.unsupportedProvider }
                     remote = try JSONDecoder().decode([Measurement].self, from: Data(contentsOf: coordinatedURL))
                 } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
                     remote = []

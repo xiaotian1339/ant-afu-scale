@@ -971,6 +971,7 @@ struct ProfileView: View {
 
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var showingFolderPicker: Bool = false
+    @State private var showingFolderBindingError = false
 
     var body: some View {
         NavigationStack {
@@ -1183,19 +1184,20 @@ struct ProfileView: View {
                     }
                 }
             }
-            .fileImporter(
-                isPresented: $showingFolderPicker,
-                allowedContentTypes: [.folder],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    if let url = urls.first {
-                        cloudSync.bindFolder(url: url, historyStore: historyStore)
-                    }
-                case .failure(let error):
-                    AppLog("选择 iCloud 云盘文件夹失败: \(error.localizedDescription)")
-                }
+            .sheet(isPresented: $showingFolderPicker, onDismiss: {
+                showingFolderBindingError = cloudSync.bindingError != nil
+            }) {
+                SyncFolderPicker(onSelect: { url in
+                    cloudSync.bindFolder(url: url, historyStore: historyStore)
+                    showingFolderPicker = false
+                }, onCancel: {
+                    showingFolderPicker = false
+                })
+            }
+            .alert("无法绑定文件夹", isPresented: $showingFolderBindingError) {
+                Button("好", role: .cancel) { cloudSync.clearBindingError() }
+            } message: {
+                Text(cloudSync.bindingError ?? "请选择 iCloud 云盘中的文件夹。")
             }
         }
     }
