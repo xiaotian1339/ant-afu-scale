@@ -30,12 +30,22 @@ struct HealthProfileData {
 final class HealthKitManager {
     private let store = HKHealthStore()
 
-    // 仅写入公开且与测量语义相符的四项。BMR 是每日估算，不是某时间段内实际消耗。
-    // iOS 26 未提供骨量、体水分量、肌肉量对应的公开 HealthKit 类型。
     private let bodyMass = HKQuantityType(.bodyMass)
     private let bodyFat = HKQuantityType(.bodyFatPercentage)
     private let bmiType = HKQuantityType(.bodyMassIndex)
     private let leanMass = HKQuantityType(.leanBodyMass)
+    // 可选类型仅在系统实际支持时才申请和写入；本地指标展示不依赖 HealthKit。
+    private let boneMassIdentifier = HKQuantityTypeIdentifier(rawValue: "HKQuantityTypeIdentifierBoneMass")
+    private let bodyWaterMassIdentifier = HKQuantityTypeIdentifier(rawValue: "HKQuantityTypeIdentifierBodyWaterMass")
+
+    private var boneMass: HKQuantityType? {
+        HKObjectType.quantityType(forIdentifier: boneMassIdentifier)
+    }
+
+    private var bodyWaterMass: HKQuantityType? {
+        HKObjectType.quantityType(forIdentifier: bodyWaterMassIdentifier)
+    }
+
     private let heightType = HKQuantityType(.height)
     private let dateOfBirthType = HKCharacteristicType(.dateOfBirth)
     private let biologicalSexType = HKCharacteristicType(.biologicalSex)
@@ -45,7 +55,9 @@ final class HealthKitManager {
     /// 请求写入权限（首次会弹系统授权页）。
     func requestAuthorization() async throws {
         guard isAvailable else { return }
-        let types: Set<HKSampleType> = [bodyMass, bodyFat, bmiType, leanMass]
+        var types: Set<HKSampleType> = [bodyMass, bodyFat, bmiType, leanMass]
+        if let boneMass { types.insert(boneMass) }
+        if let bodyWaterMass { types.insert(bodyWaterMass) }
         do {
             try await store.requestAuthorization(toShare: types, read: [heightType, dateOfBirthType, biologicalSexType])
         } catch {
@@ -141,6 +153,20 @@ final class HealthKitManager {
             type: leanMass,
             quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: m.leanBodyMassKg),
             start: date, end: date))
+
+        if let boneMass {
+            samples.append(HKQuantitySample(
+                type: boneMass,
+                quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: m.boneMassKg),
+                start: date, end: date))
+        }
+
+        if let bodyWaterMass {
+            samples.append(HKQuantitySample(
+                type: bodyWaterMass,
+                quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: m.waterMassKg),
+                start: date, end: date))
+        }
 
         do {
             try await store.save(samples)
