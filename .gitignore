@@ -1,0 +1,30 @@
+# Xcode
+.DS_Store
+*/.DS_Store
+build/
+DerivedData/
+*.moved-aside
+*.xcuserstate
+*.xcactivitylog
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Swift compiler artifacts
+*.o
+*.swiftdoc
+*.swiftmodule
+*.swiftsourceinfo
+
+# App specific caches
+scratch/
+*.ipa
+dist/
+*.keychain
+*.keychain-db
+
+# Local development & private scripts
+AGENTS.md
+.agent/
+Scripts/
